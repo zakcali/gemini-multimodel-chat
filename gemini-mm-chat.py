@@ -198,7 +198,7 @@ default_model = model_list[0] if model_list else None
 safety_threshold_choices = list(BLOCK_THRESHOLD_MAP.keys())
 
 # --- Gradio User Interface ---
-with gr.Blocks(theme=gr.themes.Soft(), title="💬 Gemini Multi-turn Chat") as demo:
+with gr.Blocks(theme=gr.themes.Default(), title="💬 Gemini Multi-turn Chat") as demo:
     gr.Markdown("# 💬 Gemini Multi-turn Chat with Image Generation")
     gr.Markdown("Chat with Gemini using the official Chat API! Configure model settings, generate images, analyze them, or have conversations with full context retention.")
     
@@ -243,9 +243,11 @@ with gr.Blocks(theme=gr.themes.Soft(), title="💬 Gemini Multi-turn Chat") as d
                     minimum=1024, maximum=1000000, value=128000, step=1024,
                     label="Max Output Tokens"
                 )
-                thinking_budget_slider = gr.Slider(
-                    minimum=0, maximum=16384, value=8192, step=256,
-                    label="Thinking Budget (Tokens)"
+                # MODIFIED: Changed Slider to Number input for thinking budget
+                thinking_budget_input = gr.Number(
+                    label="Thinking Budget (Tokens)",
+                    value=-1,
+                    info="Set to 0 to disable, or -1 for dynamic thinking."
                 )
                 gr.Markdown("#### Safety Settings")
                 hate_speech_dd = gr.Dropdown(label="Hate Speech", choices=safety_threshold_choices, value="BLOCK_NONE")
@@ -277,9 +279,10 @@ with gr.Blocks(theme=gr.themes.Soft(), title="💬 Gemini Multi-turn Chat") as d
         )
         return result
     
+    # MODIFIED: Changed thinking_budget_slider to thinking_budget_input
     inputs_list = [
         prompt_box, input_image, chat_session, model_choice, system_prompt_box, 
-        temperature_slider, top_p_slider, max_tokens_slider, thinking_budget_slider,
+        temperature_slider, top_p_slider, max_tokens_slider, thinking_budget_input,
         hate_speech_dd, harassment_dd, sexually_explicit_dd, dangerous_content_dd
     ]
     outputs_list = [chatbot, prompt_box, status_box, download_btn, output_image, chat_session]
