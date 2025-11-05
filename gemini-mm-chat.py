@@ -240,7 +240,7 @@ with gr.Blocks(theme=gr.themes.Default(), title="💬 Gemini Multi-turn Chat") a
                     label="Top P"
                 )
                 max_tokens_slider = gr.Slider(
-                    minimum=1024, maximum=1000000, value=128000, step=1024,
+                    minimum=1024, maximum=65536, value=65536, step=1024,
                     label="Max Output Tokens"
                 )
                 # MODIFIED: Changed Slider to Number input for thinking budget
