@@ -24,8 +24,8 @@ A powerful Gradio-based chat interface for Google's Gemini API featuring multi-t
 
 1. Clone this repository:
 ```bash
-git clone <https://github.com/zakcali/gemini-multimodel-chat>
-cd <gemini-multimodel-chat>
+git clone https://github.com/zakcali/gemini-multimodel-chat
+cd gemini-multimodel-chat
 ```
 
 2. Install required dependencies:
