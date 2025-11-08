@@ -116,67 +116,6 @@ def export_chat_to_markdown(chat_session_state, token_info_state, model_choice, 
         return None
 
 
-def export_chat_to_markdown(chat_session_state, token_info_state, model_choice, system_prompt):
-    """Export the entire chat history to a markdown file."""
-    if not chat_session_state:
-        return None
-    
-    try:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # Create markdown content
-        md_content = f"# Gemini Chat History\n\n"
-        md_content += f"**Exported:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-        md_content += f"**Model:** {model_choice}\n\n"
-        
-        if system_prompt and system_prompt.strip():
-            md_content += f"**System Prompt:**\n```\n{system_prompt}\n```\n\n"
-        
-        md_content += "---\n\n"
-        
-        # Get full history from chat session
-        history = chat_session_state.get_history()
-        
-        for idx, message in enumerate(history, 1):
-            role = "🤖 **Assistant**" if message.role == "model" else "👤 **User**"
-            md_content += f"## Message {idx} - {role}\n\n"
-            
-            for part in message.parts:
-                if part.text:
-                    md_content += f"{part.text}\n\n"
-                elif hasattr(part, "inline_data") and part.inline_data:
-                    # Handle inline images
-                    img_data = part.inline_data.data
-                    img_base64 = base64.b64encode(img_data).decode()
-                    mime_type = part.inline_data.mime_type or "image/png"
-                    md_content += f"![Image](data:{mime_type};base64,{img_base64})\n\n"
-            
-            md_content += "---\n\n"
-        
-        # Add token usage summary
-        if token_info_state:
-            md_content += "## 📊 Token Usage Summary\n\n"
-            md_content += f"- **Total Prompt Tokens:** {token_info_state.get('total_prompt_tokens', 0)}\n"
-            md_content += f"- **Total Response Tokens:** {token_info_state.get('total_response_tokens', 0)}\n"
-            md_content += f"- **Total Tokens:** {token_info_state.get('total_tokens', 0)}\n\n"
-        
-        # Save to temporary file
-        with tempfile.NamedTemporaryFile(
-            delete=False, 
-            suffix=f"_gemini_chat_{timestamp}.md", 
-            mode="w", 
-            encoding="utf-8"
-        ) as temp_file:
-            output_filepath = temp_file.name
-            temp_file.write(md_content)
-        
-        temp_files_to_clean.append(output_filepath)
-        return output_filepath
-        
-    except Exception as e:
-        print(f"Error exporting chat history: {e}")
-        return None
-
 # --- Function for download file ---
 def generate_chat_history_file(chat_session, token_info, model_choice, system_prompt):
     """Generate chat history markdown file and show in gr.File component."""
@@ -494,19 +433,6 @@ def new_conversation():
     return [], "", "🔄 New conversation started.", gr.update(visible=False), None, None, "", new_token_state, gr.update(visible=False)
 
 
-def download_chat_history(chat_session, token_info, model_choice, system_prompt):
-    """Generate chat history only when user clicks the button."""
-    if not chat_session:
-        print("No active chat session to export")
-        return gr.update(visible=False)
-    
-    filepath = export_chat_to_markdown(chat_session, token_info, model_choice, system_prompt)
-    if filepath:
-        print(f"Chat history export created: {filepath}")
-        return gr.update(visible=True, value=filepath)
-    else:
-        print("Failed to generate chat history export")
-        return gr.update(visible=False)
 
 # --- Load configuration and build UI ---
 model_list = load_models()
@@ -630,11 +556,6 @@ with gr.Blocks(theme=gr.themes.Default(), title="💬 Gemini Multi-turn Chat") a
         inputs=[chat_session, token_info, model_choice, system_prompt_box],
         outputs=[chat_file_output],
     )
-
-if __name__ == "__main__":
-    print("Launching Gradio interface with Gemini Chat API... Press Ctrl+C to exit.")
-    demo.launch()
-
 
 if __name__ == "__main__":
     print("Launching Gradio interface with Gemini Chat API... Press Ctrl+C to exit.")
