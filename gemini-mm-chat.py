@@ -7,7 +7,12 @@ from io import BytesIO
 import tempfile
 import atexit
 import base64
+import time
 from datetime import datetime
+import unicodedata
+import shutil
+import mimetypes
+
 
 # --- Global list to track temporary files ---
 temp_files_to_clean = []
@@ -25,12 +30,278 @@ def cleanup_temp_files():
 
 atexit.register(cleanup_temp_files)
 
+# Supported document types for File Search
+SUPPORTED_DOC_TYPES = ['.pdf', '.docx', '.txt', '.json', '.csv', '.md', '.html', '.xml']
+
+def _make_ascii_safe_filename(filename):
+    """
+    Convert filename to a Windows-safe ASCII version by removing or simplifying
+    any non-ASCII characters (accents, symbols, ideographs, etc.).
+    Example:
+      "fíle_şöğü你好.docx" -> "file_sogu.docx"
+    """
+    name, ext = os.path.splitext(filename)
+    # Normalize to NFKD form and strip accents/symbols
+    normalized = unicodedata.normalize("NFKD", name)
+    ascii_name = normalized.encode("ascii", "ignore").decode("ascii")
+    # Replace spaces or unsafe chars with underscore
+    ascii_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in ascii_name)
+    return ascii_name + ext
+
+def upload_document_to_file_search(file_path, store_state):
+    """
+    Uploads a document to a File Search store.
+    Handles non-ASCII filenames safely on Windows.
+    """
+    if not client:
+        return None, "❌ Gemini client not initialized", store_state
+    
+    if not file_path:
+        return None, "", store_state
+    
+    try:
+        temp_files_to_clean.append(file_path)
+        print(f"Tracking document for cleanup: {file_path}")
+        
+        file_ext = os.path.splitext(file_path)[1].lower()
+        if file_ext not in SUPPORTED_DOC_TYPES:
+            return None, f"⚠️ Unsupported file type: {file_ext}. Supported: {', '.join(SUPPORTED_DOC_TYPES)}", store_state
+        
+        # Create or reuse store
+        if store_state is None:
+            print("Creating new File Search store...")
+            store = client.file_search_stores.create()
+            store_state = {
+                'store_name': store.name,
+                'uploaded_files': []
+            }
+        
+        # ---- Handle Windows unsafe filenames ----
+        dir_path = os.path.dirname(file_path)
+        base_name = os.path.basename(file_path)
+        safe_name = _make_ascii_safe_filename(base_name)
+        safe_path = os.path.join(dir_path, safe_name)
+
+        if base_name != safe_name:
+            print(f"Renaming for upload (safe ASCII): '{base_name}' → '{safe_name}'")
+            shutil.copy2(file_path, safe_path)
+            upload_target = safe_path
+        else:
+            upload_target = file_path
+
+        # Add support for Markdown and other rare types on Windows
+        mimetypes.add_type("text/markdown", ".md")
+        mimetypes.add_type("text/csv", ".csv")
+        mimetypes.add_type("application/json", ".json")
+        mimetypes.add_type("application/xml", ".xml")
+
+        mime_type, _ = mimetypes.guess_type(upload_target)
+        
+        print(f"Uploading document ({mime_type or 'unknown'}): {upload_target}")
+        upload_op = client.file_search_stores.upload_to_file_search_store(
+            file_search_store_name=store_state['store_name'],
+            file=upload_target
+        )
+        
+        # Wait for upload to complete
+        max_wait = 300
+        wait_time = 0
+        while wait_time < max_wait:
+            if hasattr(upload_op, 'done') and upload_op.done:
+                break
+            time.sleep(5)
+            try:
+                upload_op = client.operations.get(
+                    name=upload_op.name if hasattr(upload_op, 'name') else upload_op
+                )
+            except:
+                if wait_time >= 10:
+                    break
+            wait_time += 2
+        
+        # Track uploaded file by its original (user-visible) name
+        store_state['uploaded_files'].append(os.path.basename(file_path))
+        
+        status_msg = f"✅ Document uploaded: {os.path.basename(file_path)}\n📚 Total documents in store: {len(store_state['uploaded_files'])}"
+        return store_state['store_name'], status_msg, store_state
+        
+    except Exception as e:
+        error_msg = f"❌ Error uploading document: {e}"
+        print(error_msg)
+        import traceback
+        traceback.print_exc()
+        return None, error_msg, store_state
+
+
+def format_grounding_sources(grounding_metadata):
+    """
+    Formats grounding metadata into a comprehensive, user-friendly display with detailed source information.
+    Returns Markdown-formatted string for display in Gradio Markdown component.
+    
+    FIXED: Proper HTML <details> tag formatting for Gradio
+    FIXED: Shows ALL chunks, not just first 3
+    ENHANCED: Adds search entry point and grounding attributions
+    """
+    if not grounding_metadata:
+        return ""
+    
+    output = "\n\n---\n\n### 📚 Grounding Sources\n\n"
+    
+    # 1. SEARCH ENTRY POINT - Link to view all sources (NEW)
+    if hasattr(grounding_metadata, 'search_entry_point') and grounding_metadata.search_entry_point:
+        entry_point = grounding_metadata.search_entry_point
+        if hasattr(entry_point, 'rendered_content') and entry_point.rendered_content:
+            output += f"🔗 **[View All Sources Together]({entry_point.rendered_content})**\n\n---\n\n"
+    
+    # 2. GROUNDING ATTRIBUTIONS - Source-level confidence scores (NEW)
+    if hasattr(grounding_metadata, 'grounding_attributions') and grounding_metadata.grounding_attributions:
+        output += "#### 🎯 Source Relevance Scores\n\n"
+        
+        for idx, attribution in enumerate(grounding_metadata.grounding_attributions, 1):
+            if hasattr(attribution, 'source_id'):
+                source_id = attribution.source_id
+                source_name = "Unknown Source"
+                
+                # Extract source name from different types
+                if hasattr(source_id, 'grounding_passage') and source_id.grounding_passage:
+                    passage = source_id.grounding_passage
+                    if hasattr(passage, 'passage_id'):
+                        source_name = passage.passage_id
+                elif hasattr(source_id, 'semantic_retriever_chunk') and source_id.semantic_retriever_chunk:
+                    chunk = source_id.semantic_retriever_chunk
+                    if hasattr(chunk, 'source'):
+                        source_name = chunk.source
+                
+                output += f"{idx}. **{source_name}**"
+                
+                if hasattr(attribution, 'confidence_score') and attribution.confidence_score:
+                    score_pct = attribution.confidence_score * 100
+                    output += f" - 🎯 {score_pct:.1f}% confidence"
+                
+                output += "\n"
+        
+        output += "\n---\n\n"
+    
+    # 3. GROUNDING CHUNKS - All chunks with proper expandable formatting
+    if not hasattr(grounding_metadata, 'grounding_chunks') or not grounding_metadata.grounding_chunks:
+        return output + "*No grounding chunks found*\n"
+    
+    sources_dict = {}
+    chunk_counter = 0
+    
+    for chunk in grounding_metadata.grounding_chunks:
+        if hasattr(chunk, 'retrieved_context') and chunk.retrieved_context:
+            context = chunk.retrieved_context
+            title = context.title if hasattr(context, 'title') else "Unknown Source"
+            
+            if title not in sources_dict:
+                sources_dict[title] = {
+                    'title': title,
+                    'uri': context.uri if hasattr(context, 'uri') else None,
+                    'chunks': []
+                }
+            
+            # Add chunk with full details
+            chunk_info = {}
+            if hasattr(context, 'text') and context.text:
+                chunk_info['text'] = context.text
+                # Longer preview for better context
+                chunk_info['preview'] = context.text[:500] + "..." if len(context.text) > 500 else context.text
+            
+            if hasattr(context, 'uri') and context.uri:
+                chunk_info['location'] = context.uri
+            
+            # Add chunk relevance if available
+            if hasattr(chunk, 'chunk_relevance_score'):
+                chunk_info['relevance'] = chunk.chunk_relevance_score
+            
+            if chunk_info:
+                sources_dict[title]['chunks'].append(chunk_info)
+                chunk_counter += 1
+        
+        # Handle web search chunks
+        elif hasattr(chunk, 'web'):
+            web_chunk = chunk.web
+            title = "🌐 Web Search Results"
+            
+            if title not in sources_dict:
+                sources_dict[title] = {
+                    'title': title,
+                    'uri': None,
+                    'chunks': [],
+                    'is_web': True
+                }
+            
+            chunk_info = {}
+            if hasattr(web_chunk, 'uri'):
+                chunk_info['location'] = web_chunk.uri
+            if hasattr(web_chunk, 'title'):
+                chunk_info['web_title'] = web_chunk.title
+            
+            sources_dict[title]['chunks'].append(chunk_info)
+            chunk_counter += 1
+    
+    if not sources_dict:
+        return output + "*No sources found*\n"
+    
+    # Build formatted output with ALL chunks visible
+    output += f"#### 📖 Retrieved Content\n\n"
+    output += f"*📊 Total: **{chunk_counter} chunks** from **{len(sources_dict)} documents***\n\n"
+    
+    for idx, (title, info) in enumerate(sources_dict.items(), 1):
+        is_web = info.get('is_web', False)
+        icon = "🌐" if is_web else "📄"
+        output += f"**{idx}. {icon} {title}**\n\n"
+        
+        if info['uri'] and not is_web:
+            output += f"📍 *Location:* `{info['uri']}`\n\n"
+        
+        if info['chunks']:
+            output += f"📦 *Chunks Retrieved:* {len(info['chunks'])}\n\n"
+            
+            # CRITICAL FIX: Show ALL chunks with proper Gradio HTML formatting
+            for chunk_idx, chunk_info in enumerate(info['chunks'], 1):
+                if is_web and 'web_title' in chunk_info:
+                    output += f"  - [{chunk_info['web_title']}]({chunk_info.get('location', '#')})\n"
+                elif 'preview' in chunk_info:
+                    # CRITICAL: Blank lines around HTML tags for Gradio Markdown
+                    output += f"\n<details>\n\n<summary>📝 Chunk {chunk_idx}"
+                    
+                    if 'relevance' in chunk_info:
+                        output += f" (Relevance: {chunk_info['relevance']:.1%})"
+                    
+                    output += f"</summary>\n\n```\n{chunk_info['preview']}\n```\n\n</details>\n"
+        
+        output += "\n---\n\n"
+    
+    # 4. GROUNDING QUALITY METRICS
+    if hasattr(grounding_metadata, 'grounding_support') and grounding_metadata.grounding_support:
+        support = grounding_metadata.grounding_support
+        
+        output += "#### 📊 Grounding Quality\n\n"
+        
+        if hasattr(support, 'grounding_chunk_indices') and support.grounding_chunk_indices:
+            output += f"- **Active Chunks:** {len(support.grounding_chunk_indices)}\n"
+        
+        if hasattr(support, 'support_score'):
+            output += f"- **Support Score:** {support.support_score:.2%}\n"
+        
+        if hasattr(support, 'confidence_score'):
+            output += f"- **Confidence:** {support.confidence_score:.2%}\n"
+        
+        output += "\n"
+    
+    output += "\n*💡 Click any chunk to see the exact text used to ground this response*\n"
+    
+    return output
+
+
 def load_models(filepath="models.txt"):
     default_models = [
         "gemini-2.5-pro",
+        "gemini-2.5-flash",
         "gemini-flash-latest",
         "gemini-2.5-flash-image-preview",
-        "gemini-2.5-flash",
         "gemini-2.5-flash-lite-preview-09-2025",
     ]
     try:
@@ -116,7 +387,6 @@ def export_chat_to_markdown(chat_session_state, token_info_state, model_choice, 
         return None
 
 
-# --- Function for download file ---
 def generate_chat_history_file(chat_session, token_info, model_choice, system_prompt):
     """Generate chat history markdown file and show in gr.File component."""
     if not chat_session:
@@ -130,11 +400,14 @@ def generate_chat_history_file(chat_session, token_info, model_choice, system_pr
         print("Failed to generate chat history export")
         return None
 
-# --- Core Logic using Gemini Chat API ---
+
+
 def chat_with_gemini(
     prompt,
     source_image,
+    source_document,
     chat_session_state,
+    file_search_store_state,
     model_choice,
     system_prompt,
     temperature,
@@ -146,9 +419,10 @@ def chat_with_gemini(
     sexually_explicit,
     dangerous_content,
     token_info_state,
+    use_file_search,
 ):
     """
-    Handles multi-turn conversation using Gemini's Chat API with token counting.
+    Handles multi-turn conversation using Gemini's Chat API with token counting and File Search.
     """
     if not client:
         return (
@@ -161,12 +435,39 @@ def chat_with_gemini(
             "",
             token_info_state,
             gr.update(visible=False),
+            "",
+            file_search_store_state,
+            None,
+            "",  # grounding sources
         )
+
+    # Handle document upload if provided
+    document_status = ""
+    if source_document:
+        store_name, doc_status, file_search_store_state = upload_document_to_file_search(
+            source_document, file_search_store_state
+        )
+        document_status = doc_status
+        if "Error" in doc_status or "Unsupported" in doc_status:
+            return (
+                [],
+                "",
+                doc_status,
+                gr.update(visible=False),
+                None,
+                chat_session_state,
+                token_info_state.get("display", "") if token_info_state else "",
+                token_info_state,
+                gr.update(visible=False),
+                document_status,
+                file_search_store_state,
+                None,
+                "",  # grounding sources
+            )
 
     if not prompt or not prompt.strip():
         current_download = gr.update(visible=False)
         if chat_session_state:
-            # If chat exists, prepare download
             filepath = export_chat_to_markdown(chat_session_state, token_info_state, model_choice, system_prompt)
             if filepath:
                 current_download = gr.update(visible=True, value=filepath)
@@ -181,6 +482,10 @@ def chat_with_gemini(
             token_info_state.get("display", "") if token_info_state else "",
             token_info_state,
             current_download,
+            document_status,
+            file_search_store_state,
+            None,
+            "",  # grounding sources
         )
 
     # Initialize token info state if needed
@@ -206,6 +511,10 @@ def chat_with_gemini(
                 "",
                 token_info_state,
                 gr.update(visible=False),
+                document_status,
+                file_search_store_state,
+                None,
+                "",  # grounding sources
             )
 
         try:
@@ -244,6 +553,17 @@ def chat_with_gemini(
                 safety_settings=safety_settings,
             )
 
+            # Add File Search tool if enabled and store exists
+            if use_file_search and file_search_store_state and file_search_store_state.get('store_name'):
+                config.tools = [
+                    types.Tool(
+                        file_search=types.FileSearch(
+                            file_search_store_names=[file_search_store_state['store_name']]
+                        )
+                    )
+                ]
+                print(f"File Search enabled with store: {file_search_store_state['store_name']}")
+
             # Add system instruction if provided
             if system_prompt and system_prompt.strip():
                 config.system_instruction = system_prompt
@@ -263,6 +583,10 @@ def chat_with_gemini(
                 "",
                 token_info_state,
                 gr.update(visible=False),
+                document_status,
+                file_search_store_state,
+                None,
+                "",  # grounding sources
             )
 
     try:
@@ -315,6 +639,14 @@ def chat_with_gemini(
         token_display = f"**This Turn**: {current_turn_info}{cumulative_info}"
         token_info_state["display"] = token_display
 
+        # Extract grounding metadata and format sources
+        grounding_sources_display = ""
+        if hasattr(response, 'candidates') and len(response.candidates) > 0:
+            candidate = response.candidates[0]
+            if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
+                grounding_sources_display = format_grounding_sources(candidate.grounding_metadata)
+                print(f"Grounding sources found: {grounding_sources_display[:100]}...")
+
         # Check for generated images
         generated_image_data = None
         for part in response.candidates[0].content.parts:
@@ -352,38 +684,52 @@ def chat_with_gemini(
             if chatbot_history and chatbot_history[-1]["role"] == "assistant":
                 chatbot_history[-1]["content"] += "\n\n🖼️ [Image generated - see below]"
 
+            status_msg = "✅ Image generated successfully!"
+            if grounding_sources_display:
+                status_msg += " (with grounded sources)"
+
             download_update = gr.update(visible=True) if chat_session_state else gr.update(visible=False)
             return (
                 chatbot_history,
                 "",
-                "✅ Image generated successfully!",
+                status_msg,
                 gr.update(visible=True, value=output_filepath),
                 output_filepath,
                 chat_session_state,
                 token_display,
                 token_info_state,
                 download_update,
+                document_status,
+                file_search_store_state,
+                None,
+                grounding_sources_display,
             )
         else:
+            status_msg = "✅ Response received."
+            if grounding_sources_display:
+                status_msg += " (grounded in uploaded documents)"
+
             download_update = gr.update(visible=True) if chat_session_state else gr.update(visible=False)   
             return (
                 chatbot_history,
                 "",
-                "✅ Response received.",
+                status_msg,
                 gr.update(visible=False),
                 None,
                 chat_session_state,
                 token_display,
                 token_info_state,
                 download_update,
+                document_status,
+                file_search_store_state,
+                None,
+                grounding_sources_display,
             )
 
     except errors.APIError as e:
         error_message = f"❌ API Error ({e.code}): {e.message}"
         current_history = [{"role": "assistant", "content": error_message}]
         
-        # Still try to export what we have
-    
         download_update = gr.update(visible=True) if chat_session_state else gr.update(visible=False)
         
         return (
@@ -396,13 +742,16 @@ def chat_with_gemini(
             token_info_state.get("display", "") if token_info_state else "",
             token_info_state,
             download_update,
+            document_status,
+            file_search_store_state,
+            None,
+            "",  # grounding sources
         )
 
     except Exception as e:
         error_message = f"❌ Unexpected error: {e}"
         current_history = [{"role": "assistant", "content": error_message}]
         
-        # Still try to export what we have
         download_update = gr.update(visible=False)
         if chat_session_state:
             chat_export_path = export_chat_to_markdown(chat_session_state, token_info_state, model_choice, system_prompt)
@@ -419,6 +768,10 @@ def chat_with_gemini(
             token_info_state.get("display", "") if token_info_state else "",
             token_info_state,
             download_update,
+            document_status,
+            file_search_store_state,
+            None,
+            "",  # grounding sources
         )
 
 
@@ -430,8 +783,7 @@ def new_conversation():
         "total_tokens": 0,
         "display": ""
     }
-    return [], "", "🔄 New conversation started.", gr.update(visible=False), None, None, "", new_token_state, gr.update(visible=False)
-
+    return [], "", "🔄 New conversation started.", gr.update(visible=False), None, None, "", new_token_state, gr.update(visible=False), "", None, None, ""
 
 
 # --- Load configuration and build UI ---
@@ -440,23 +792,37 @@ default_model = model_list[0] if model_list else None
 safety_threshold_choices = list(BLOCK_THRESHOLD_MAP.keys())
 
 with gr.Blocks(theme=gr.themes.Default(), title="💬 Gemini Multi-turn Chat") as demo:
-    gr.Markdown("# 💬 Gemini Multi-turn Chat with Image Generation & Token Counting")
+    gr.Markdown("# 💬 Gemini Multi-turn Chat with Image Generation, Document Analysis & Token Counting")
+    gr.Markdown("📄 **New**: Upload documents (PDF, DOCX, TXT, JSON, etc.) for RAG-powered analysis using File Search!")
 
     chat_session = gr.State(None)
     token_info = gr.State(None)
+    file_search_store = gr.State(None)
 
     with gr.Row():
         with gr.Column(scale=2):
             chatbot = gr.Chatbot(label="Conversation", height=600, show_copy_button=True, type="messages")
             token_usage_box = gr.Markdown(label="Token Usage", value="")
+            grounding_sources_box = gr.Markdown(label="Grounding Sources", value="")
             status_box = gr.Markdown("")
+            document_status_box = gr.Markdown("")
             gr.Markdown("---")
             output_image = gr.Image(label="Latest Generated Image", height=400, show_download_button=False, visible=True)
 
         with gr.Column(scale=1):
             model_choice = gr.Dropdown(label="Choose a Model", choices=model_list, value=default_model)
-            input_image = gr.Image(type="pil", label="Upload Image (Optional)", height=200)
-            prompt_box = gr.Textbox(label="Your Message", placeholder="Ask questions, request images, or analyze uploaded images...", lines=8)
+            
+            # File upload section with tabs
+            with gr.Tabs() as upload_tabs:
+                with gr.Tab("🖼️ Image"):
+                    input_image = gr.Image(type="pil", label="Upload Image", height=200)
+                with gr.Tab("📄 Document"):
+                    input_document = gr.File(
+                        label="Upload Document (PDF, DOCX, TXT, JSON, CSV, MD, HTML, XML)",
+                        file_types=SUPPORTED_DOC_TYPES
+                    )
+            
+            prompt_box = gr.Textbox(label="Your Message", placeholder="Ask questions, request images, or analyze uploaded documents...", lines=8)
 
             with gr.Accordion("Advanced Settings", open=False):
                 system_prompt_box = gr.Textbox(label="System Prompt", placeholder="e.g., You are a helpful assistant.", lines=3)
@@ -478,24 +844,28 @@ with gr.Blocks(theme=gr.themes.Default(), title="💬 Gemini Multi-turn Chat") a
 
             with gr.Row():
                 download_image_btn = gr.DownloadButton(label="💾 Download Image", visible=False, scale=1)
-                # New chat history export controls
                 generate_chat_btn = gr.Button("📥 Generate Chat History File", scale=2)
             chat_file_output = gr.File(label="📄 Chat History File", visible=False)        
 
     # --- Send button and input bindings ---
     def send_message(
-        prompt, image, session, model, system_prompt, temp, top_p, tokens,
+        prompt, image, document, session, file_store, model, system_prompt, temp, top_p, tokens,
         thinking_budget, hate, harass, sexual, dangerous, token_state
     ):
+        # Automatically enable file search only if document is uploaded (not image)
+        use_file_search = True if document and not image else False
+        
         return chat_with_gemini(
-            prompt, image, session, model, system_prompt, temp,
-            tokens, thinking_budget, top_p, hate, harass, sexual, dangerous, token_state
+            prompt, image, document, session, file_store, model, system_prompt, temp,
+            tokens, thinking_budget, top_p, hate, harass, sexual, dangerous, token_state, use_file_search
         )
 
     inputs_list = [
         prompt_box,
         input_image,
+        input_document,
         chat_session,
+        file_search_store,
         model_choice,
         system_prompt_box,
         temperature_slider,
@@ -518,7 +888,11 @@ with gr.Blocks(theme=gr.themes.Default(), title="💬 Gemini Multi-turn Chat") a
         chat_session,
         token_usage_box,
         token_info,
-        chat_file_output,  # replaced download_chat_btn
+        chat_file_output,
+        document_status_box,
+        file_search_store,
+        input_document,
+        grounding_sources_box,
     ]
 
     send_btn.click(fn=send_message, inputs=inputs_list, outputs=outputs_list).then(
@@ -530,8 +904,8 @@ with gr.Blocks(theme=gr.themes.Default(), title="💬 Gemini Multi-turn Chat") a
     )
 
     clear_input_btn.click(
-        fn=lambda: ("", None, "✏️ Input cleared."),
-        outputs=[prompt_box, input_image, status_box],
+        fn=lambda: ("", None, None, "✏️ Input cleared."),
+        outputs=[prompt_box, input_image, input_document, status_box],
         queue=False,
     )
 
@@ -546,11 +920,14 @@ with gr.Blocks(theme=gr.themes.Default(), title="💬 Gemini Multi-turn Chat") a
             chat_session,
             token_usage_box,
             token_info,
-            chat_file_output,  # replaced download_chat_btn
+            chat_file_output,
+            document_status_box,
+            file_search_store,
+            input_document,
+            grounding_sources_box,
         ],
     )
 
-    # 🆕 Binding for chat export
     generate_chat_btn.click(
         fn=generate_chat_history_file,
         inputs=[chat_session, token_info, model_choice, system_prompt_box],
@@ -559,8 +936,8 @@ with gr.Blocks(theme=gr.themes.Default(), title="💬 Gemini Multi-turn Chat") a
 
 if __name__ == "__main__":
     print("Launching Gradio interface with Gemini Chat API... Press Ctrl+C to exit.")
-    print(
-        "To customize the model list, create a file named 'models.txt' with one model name per line."
-    )
+    print("📄 Document upload enabled: PDF, DOCX, TXT, JSON, CSV, MD, HTML, XML")
+    print("🔍 Enhanced grounding sources display - see which documents power each response!")
+    print("To customize the model list, create a file named 'models.txt' with one model name per line.")
     print("Temporary files for this session will be cleaned up automatically on exit.")
     demo.launch()
