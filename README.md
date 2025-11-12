@@ -13,8 +13,8 @@ A powerful Gradio-based chat interface for Google's Gemini API featuring multi-t
 - **Token Tracking**: Real-time token counting for prompts, responses, and conversation history
 
 ### Advanced Features
-- **Model Selection**: Choose from multiple Gemini models (2.5 Pro, Flash, Sonnet, etc.)
-- **File Search Store**: Persistent document storage across conversations for RAG queries
+- **Model Selection**: Choose from multiple Gemini models (2.5 Pro, Flash, etc.)
+- **File Search Store Management**: List and delete persistent document stores to manage storage
 - **Detailed Grounding Metadata**: View source relevance scores, chunk details, and grounding quality metrics
 - **Chat History Export**: Export full conversations to Markdown with embedded images and token statistics
 - **Advanced Configuration**: Control temperature, top-p, max tokens, and thinking budget
@@ -98,6 +98,26 @@ Summarize the main points of this document
 ```
 4. View grounding sources to see which document chunks informed the response
 
+### File Search Store Management
+
+**Important**: File Search stores persist indefinitely until deleted. While uploaded files expire after 48 hours, the indexed data remains in the store.
+
+#### List All Stores
+1. Open "🗄️ File Search Store Management" accordion
+2. Click "📋 List All Stores" to view:
+   - Store names and display names
+   - Creation timestamps
+   - Total store count
+
+#### Delete All Stores
+1. Open "🗄️ File Search Store Management" accordion
+2. Click "🗑️ Delete All Stores" to permanently remove:
+   - All File Search stores
+   - All indexed document data
+   - Current session's store state
+
+**Note**: This operation cannot be undone. Use it to clean up storage after completed projects.
+
 ### Image Generation
 Simply ask Gemini to generate an image:
 ```
@@ -172,7 +192,9 @@ Place one model name per line. If the file is missing, default models will be us
 ### File Search & RAG
 
 - Documents are uploaded to a persistent File Search store
-- Store persists across messages in the same session
+- Stores persist indefinitely until explicitly deleted
+- **Uploaded files expire after 48 hours**, but indexed data remains
+- Use File Search Store Management to clean up unused stores
 - Grounding sources show:
   - Search entry points with links to view all sources
   - Source relevance scores with confidence percentages
@@ -203,8 +225,38 @@ Example grounding display:
 1. 📄 document.pdf
 📍 Location: /path/to/file
 📦 Chunks Retrieved: 3
-  📄 Chunk 1 (Relevance: 92%)
+  🔍 Chunk 1 (Relevance: 92%)
   [Click to expand]
+```
+
+## 🗄️ File Search Store Lifecycle
+
+Understanding File Search storage behavior:
+
+### Store Creation
+- Stores are created automatically when you upload your first document
+- One store per chat session (reused for multiple documents in same session)
+- Stores persist indefinitely until deleted
+
+### File Expiration
+- Uploaded `File` objects expire after **48 hours**
+- Indexed data in the store remains permanently
+- You can continue querying indexed data after file expiration
+
+### Store Management
+**Best Practices:**
+- Use "List All Stores" to audit existing stores
+- Delete unused stores with "Delete All Stores" to free up storage
+- Clean up stores after completing projects
+- Starting a new conversation creates a fresh store if documents are uploaded
+
+**Storage Cleanup Workflow:**
+```
+1. Export chat history (if needed for records)
+2. Open File Search Store Management
+3. Click "List All Stores" to review
+4. Click "Delete All Stores" to clean up
+5. Confirm deletion in the status message
 ```
 
 ## 📁 Project Structure
@@ -236,6 +288,11 @@ If a model isn't working:
 - Files with non-ASCII characters in names are automatically renamed for compatibility
 - Check file size limits based on your API tier
 
+### File Search Store Issues
+- If stores accumulate, use "Delete All Stores" to clean up
+- Stores from old sessions persist - clean them periodically
+- Check store list before deleting to understand what will be removed
+
 ### Import Errors
 If you encounter import errors:
 ```bash
@@ -261,7 +318,8 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 ## ⚠️ Important Notes
 
 - Temporary files (images, documents, exports) are automatically cleaned up when the application exits
-- File Search stores persist within a session but are tied to the chat session state
+- File Search stores persist indefinitely and must be manually deleted
+- Uploaded files expire after 48 hours, but indexed data remains in stores
 - Starting a new conversation creates a new File Search store if documents are uploaded
 - Settings cannot be changed mid-conversation; start a new chat to apply changes
 - Token counting includes history tokens, prompt tokens, and response tokens separately
@@ -288,8 +346,15 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 - Use thinking budget strategically for complex reasoning tasks
 - Consider token counts when uploading large documents
 
+### For Store Management
+- Periodically list and delete unused File Search stores
+- Clean up stores after completing projects to free storage
+- Remember: stores persist indefinitely until you delete them
+- Use "Delete All Stores" at the end of work sessions
+
 ## 🆕 Recent Updates
 
+- ✅ **NEW**: Added File Search Store Management (list and delete stores)
 - ✅ Added RAG document upload with File Search integration
 - ✅ Enhanced grounding sources display with all chunks visible
 - ✅ Added comprehensive token tracking (history + prompt + response)
@@ -297,3 +362,11 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 - ✅ Fixed Windows compatibility for non-ASCII filenames
 - ✅ Added support for multiple document formats
 - ✅ Improved grounding metadata parsing and display
+
+## 🎯 Roadmap
+
+- [ ] Individual store deletion (select specific stores)
+- [ ] Store display names for easier identification
+- [ ] File Search store usage statistics
+- [ ] Automatic store cleanup after configurable time periods
+- [ ] Multi-store queries for cross-project document searches
