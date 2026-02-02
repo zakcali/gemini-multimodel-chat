@@ -857,7 +857,7 @@ model_list = load_models()
 default_model = model_list[0] if model_list else None
 safety_threshold_choices = list(BLOCK_THRESHOLD_MAP.keys())
 
-with gr.Blocks(theme=gr.themes.Default(), title="💬 Gemini Multi-turn Chat") as demo:
+with gr.Blocks(title="💬 Gemini Multi-turn Chat") as demo:
     gr.Markdown("# 💬 Gemini Multi-turn Chat with Image Generation, Document Analysis & Token Counting")
     gr.Markdown("📄 **New**: Upload documents (PDF, DOCX, TXT, JSON, etc.) for RAG-powered analysis using File Search!")
 
@@ -867,13 +867,13 @@ with gr.Blocks(theme=gr.themes.Default(), title="💬 Gemini Multi-turn Chat") a
 
     with gr.Row():
         with gr.Column(scale=2):
-            chatbot = gr.Chatbot(label="Conversation", height=600, show_copy_button=True, type="messages")
+            chatbot = gr.Chatbot(label="Conversation", height=600, buttons=["copy"])
             token_usage_box = gr.Markdown(label="Token Usage", value="")
             grounding_sources_box = gr.Markdown(label="Grounding Sources", value="")
             status_box = gr.Markdown("")
             document_status_box = gr.Markdown("")
             gr.Markdown("---")
-            output_image = gr.Image(label="Latest Generated Image", height=400, show_download_button=False, visible=True)
+            output_image = gr.Image(label="Latest Generated Image", height=400, visible=True)
 
         with gr.Column(scale=1):
             model_choice = gr.Dropdown(label="Choose a Model", choices=model_list, value=default_model)
@@ -1027,4 +1027,4 @@ if __name__ == "__main__":
     print("🗄️ File Search Store Management - list and delete stores to manage storage")
     print("To customize the model list, create a file named 'models.txt' with one model name per line.")
     print("Temporary files for this session will be cleaned up automatically on exit.")
-    demo.launch()
+    demo.launch(theme=gr.themes.Default())
