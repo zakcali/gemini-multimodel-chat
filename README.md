@@ -363,6 +363,7 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 - ✅ Added support for multiple document formats
 - ✅ Improved grounding metadata parsing and display
 - ✅ Updated code according to gradio 6.0;
+- 
 1- theme is now a parameter for launch : demo.launch(theme=gr.themes.Default())
 
 2- Those parameters are gone: show_copy_button=True, show_download_button=False, type="messages"
