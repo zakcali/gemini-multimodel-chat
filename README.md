@@ -362,14 +362,10 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 - ✅ Fixed Windows compatibility for non-ASCII filenames
 - ✅ Added support for multiple document formats
 - ✅ Improved grounding metadata parsing and display
-- ✅ Migrated code according to gradio 6.0, refer to (https://www.gradio.app/main/guides/gradio-6-migration-guide);
-- 
-1- theme is now a parameter for launch : demo.launch(theme=gr.themes.Default())
-
-2- Those parameters are gone: show_copy_button=True, show_download_button=False, type="messages"
-
-3- those parameters are enough for current code: chatbot = gr.Chatbot(label="Conversation", height=600, buttons=["copy"]) and
-output_image = gr.Image(label="Latest Generated Image", height=400, visible=True)
+- ✅ **Migrated to Gradio 6.0**: Updated codebase to follow the new [Migration Guide](https://www.gradio.app/main/guides/gradio-6-migration-guide):
+    - Refactored `gr.Blocks` by moving the `theme` parameter to the `.launch()` method.
+    - Updated `gr.Chatbot` and `gr.Image` to use the new `buttons` API, replacing deprecated parameters like `show_copy_button` and `show_download_button`.
+    - Removed legacy `type="messages"` parameters as dictionary-based history is now the standard.
 
 ## 🎯 Roadmap
 
