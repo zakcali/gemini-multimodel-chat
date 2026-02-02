@@ -873,7 +873,7 @@ with gr.Blocks(title="💬 Gemini Multi-turn Chat") as demo:
             status_box = gr.Markdown("")
             document_status_box = gr.Markdown("")
             gr.Markdown("---")
-            output_image = gr.Image(label="Latest Generated Image", height=400, visible=True)
+            output_image = gr.Image(label="Latest Generated Image", height=400, visible=True, buttons=[])
 
         with gr.Column(scale=1):
             model_choice = gr.Dropdown(label="Choose a Model", choices=model_list, value=default_model)
