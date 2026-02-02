@@ -362,6 +362,13 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 - ✅ Fixed Windows compatibility for non-ASCII filenames
 - ✅ Added support for multiple document formats
 - ✅ Improved grounding metadata parsing and display
+- ✅ Updated code according to gradio 6.0;
+1- theme is now a parameter for launch : demo.launch(theme=gr.themes.Default())
+
+2- Those parameters are gone: show_copy_button=True, show_download_button=False, type="messages"
+
+3- those parameter is enough for current code: chatbot = gr.Chatbot(label="Conversation", height=600, buttons=["copy"]) and
+output_image = gr.Image(label="Latest Generated Image", height=400, visible=True)
 
 ## 🎯 Roadmap
 
