@@ -362,7 +362,7 @@ Contributions, issues, and feature requests are welcome! Feel free to check the 
 - ✅ Fixed Windows compatibility for non-ASCII filenames
 - ✅ Added support for multiple document formats
 - ✅ Improved grounding metadata parsing and display
-- ✅ Updated code according to gradio 6.0;
+- ✅ Migrated code according to gradio 6.0;
 - 
 1- theme is now a parameter for launch : demo.launch(theme=gr.themes.Default())
 
